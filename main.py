@@ -1,51 +1,42 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
-import io, zipfile
+import os
+import shutil
+import zipfile
 
 app = FastAPI()
 
-# Включаем CORS для всех (для MVP; можно потом ограничить до домена фронта)
+# Healthcheck endpoint для корня
+@app.get("/")
+def healthcheck():
+    return {"status": "ok"}
+
+# Пример CORS (если нужен)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # или укажи свой фронт
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-sizes = [16, 32, 48, 64, 128, 180, 192, 256, 512]
-
-def resize_and_save(img: Image.Image) -> dict:
-    buffer_dict = {}
-    for size in sizes:
-        resized = img.resize((size, size), Image.LANCZOS)
-        buf = io.BytesIO()
-        resized.save(buf, format="PNG")
-        buffer_dict[f"icon_{size}x{size}.png"] = buf.getvalue()
-    return buffer_dict
-
-def generate_favicon_ico(img: Image.Image) -> bytes:
-    buf = io.BytesIO()
-    img.save(buf, format='ICO', sizes=[(s, s) for s in [16, 32, 48, 64, 128, 256]])
-    return buf.getvalue()
-
+# Endpoint для загрузки изображения и генерации иконок (пример)
 @app.post("/favicon")
-async def create_favicon(file: UploadFile = File(...)):
-    contents = await file.read()
-    img = Image.open(io.BytesIO(contents)).convert("RGBA")
+async def generate_favicon(file: UploadFile = File(...)):
+    # Сохраняем загруженный файл во временную директорию
+    tmp_dir = "tmp"
+    os.makedirs(tmp_dir, exist_ok=True)
+    file_path = os.path.join(tmp_dir, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    # генерим все размеры PNG + ICO
-    files = resize_and_save(img)
-    files["favicon.ico"] = generate_favicon_ico(img)
+    # Тут логика генерации favicon и иконок
+    # ... (добавь свою генерацию сюда)
 
-    # кладём в ZIP
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for fname, data in files.items():
-            zip_file.writestr(fname, data)
-    zip_buffer.seek(0)
-    return StreamingResponse(zip_buffer, media_type="application/zip", headers={
-        "Content-Disposition": "attachment; filename=favicon.zip"
-    })
+    # Пример: возвращаем оригинальный файл (замени на zip после генерации)
+    # Если генерируешь архив icons.zip, меняй путь
+    zip_path = os.path.join(tmp_dir, "icons.zip")
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.write(file_path, arcname=file.filename)
+    return FileResponse(zip_path, media_type="application/zip", filename="icons.zip")
